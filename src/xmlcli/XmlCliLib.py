@@ -1168,7 +1168,7 @@ def SanitizeXml(filename):
     RenameFile(f"{filename}", f"{filename}.raw")
     RenameFile(f"{filename}.clean", f"{filename}")
 
-def IsXmlGenerated():
+def IsXmlGenerated(disable_dram_shared_mailbox=False):
   global LastErrorSig
   LastErrorSig = 0x0000
   Status = 0
@@ -1177,21 +1177,30 @@ def IsXmlGenerated():
   log.result(f'CLI Spec Version = {GetCliSpecVersion(DRAM_MbAddr)}')
   log.debug(f'DRAM_MbAddr = 0x{DRAM_MbAddr:X}')
   if (DRAM_MbAddr == 0x0):
-    log.error('Dram Shared Mailbox not Valid, hence exiting')
-    CloseInterface()
-    return 1
-  DramSharedMBbuf = memBlock(DRAM_MbAddr,0x200) # Read/save parameter buffer
-  (XmlAddr,XmlSize)  = readxmldetails(DramSharedMBbuf) # read GBTG XML address and Size
-  if (XmlAddr == 0):
-    log.error('Platform Configuration XML not yet generated, hence exiting')
-    CloseInterface()
-    LastErrorSig = 0x8AD0  # Xml Address is Zero
-    return 1
-  if(isxmlvalid(XmlAddr,XmlSize)):
-    log.result('Xml Is Generated and it is Valid')
-  else:
-    log.error(f'XML is not valid or not yet generated XmlAddr = 0x{XmlAddr:X}, XmlSize = 0x{XmlSize:X}')
-    Status = 1
+    if disable_dram_shared_mailbox:
+      log.info('Dram Shared Mailbox not Valid, disabled. Continuing with BIOS collection.')
+      # When disabled, we'll use an invalid address which will be caught later
+      DramSharedMBbuf = 0
+      XmlAddr = 0
+      XmlSize = 0
+      Status = 0
+    else:
+      log.error('Dram Shared Mailbox not Valid, hence exiting')
+      CloseInterface()
+      return 1
+  if (DRAM_MbAddr != 0x0):
+    DramSharedMBbuf = memBlock(DRAM_MbAddr,0x200) # Read/save parameter buffer
+    (XmlAddr,XmlSize)  = readxmldetails(DramSharedMBbuf) # read GBTG XML address and Size
+    if (XmlAddr == 0):
+      log.error('Platform Configuration XML not yet generated, hence exiting')
+      CloseInterface()
+      LastErrorSig = 0x8AD0  # Xml Address is Zero
+      return 1
+    if(isxmlvalid(XmlAddr,XmlSize)):
+      log.result('Xml Is Generated and it is Valid')
+    else:
+      log.error(f'XML is not valid or not yet generated XmlAddr = 0x{XmlAddr:X}, XmlSize = 0x{XmlSize:X}')
+      Status = 1
   CloseInterface()
   return Status
 
@@ -1427,7 +1436,7 @@ def Str2Int(StrVal):
   return int(StrVal)
 
 # save XmlLite generated from BiosKnobsData bin to desired file.
-def SaveXmlLite(filename=PlatformConfigLiteXml, Operation='savexml', UserKnobsDict={}):
+def SaveXmlLite(filename=PlatformConfigLiteXml, Operation='savexml', UserKnobsDict={}, disable_dram_shared_mailbox=False):
   global LastErrorSig
   LastErrorSig = 0x0000
   Binfilename = os.path.join(TempFolder, "BiosKnobsData.bin")
@@ -1436,9 +1445,14 @@ def SaveXmlLite(filename=PlatformConfigLiteXml, Operation='savexml', UserKnobsDi
   InitInterface()
   DRAM_MbAddr = GetDramMbAddr() # Get DRam MAilbox Address from Cmos.
   if (DRAM_MbAddr == 0x0):
-    log.error('Dram Shared Mailbox not Valid, hence exiting')
-    CloseInterface()
-    return 1
+    if disable_dram_shared_mailbox:
+      log.info('Dram Shared Mailbox not Valid, disabled. Continuing with BIOS collection.')
+      CloseInterface()
+      return 1
+    else:
+      log.error('Dram Shared Mailbox not Valid, hence exiting')
+      CloseInterface()
+      return 1
   DramSharedMBbuf = memBlock(DRAM_MbAddr,0x200) # Read/save parameter buffer
   (XmlAddr,XmlSize)  = readxmldetails(DramSharedMBbuf) # read GBTG XML address and Size
   if (XmlAddr == 0):
@@ -1645,7 +1659,7 @@ def SaveXmlLite(filename=PlatformConfigLiteXml, Operation='savexml', UserKnobsDi
   return Status
 
 
-def SaveXml(filename=None, ITPOptimz=0, MbAddr=0, XmlAddr=0, XmlSize=0):
+def SaveXml(filename=None, ITPOptimz=0, MbAddr=0, XmlAddr=0, XmlSize=0, disable_dram_shared_mailbox=False):
   """
   Save entire/complete Target XML to desired file.
 
@@ -1670,9 +1684,14 @@ def SaveXml(filename=None, ITPOptimz=0, MbAddr=0, XmlAddr=0, XmlSize=0):
   log.result(f'CLI Spec Version = {GetCliSpecVersion(DRAM_MbAddr)}')
   log.debug(f'DRAM_MbAddr = 0x{DRAM_MbAddr:X}')
   if (DRAM_MbAddr == 0x0):
-    log.error('Dram Shared Mailbox not Valid, hence exiting')
-    CloseInterface()
-    return 1
+    if disable_dram_shared_mailbox:
+      log.info('Dram Shared Mailbox not Valid, disabled. Skipping XML generation.')
+      CloseInterface()
+      return 0
+    else:
+      log.error('Dram Shared Mailbox not Valid, hence exiting')
+      CloseInterface()
+      return 1
   DramSharedMBbuf = memBlock(DRAM_MbAddr,0x200) # Read/save parameter buffer
   if (filename == SvXml) :
     TempXmlOfst = LEGACYMB_XML_OFF

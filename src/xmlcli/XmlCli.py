@@ -24,16 +24,15 @@ if not configurations.PERFORMANCE:
 BootOrderDict = {}
 
 
-def cliProcessKnobs(xmlfilename, inifilename, CmdSubType, ignoreXmlgeneration=False, PrintResParams=True, ResBufFilename=0, KnobsVerify=False, KnobsDict={}):
+def cliProcessKnobs(xmlfilename, inifilename, CmdSubType, ignoreXmlgeneration=False, PrintResParams=True, ResBufFilename=0, KnobsVerify=False, KnobsDict={}, disable_dram_shared_mailbox=False):
   clb.LastErrorSig = 0x0000
   clb.InitInterface()
   DRAM_MbAddr = clb.GetDramMbAddr() # Get DRam MAilbox Address.
   log.result(f'CLI Spec Version = {clb.GetCliSpecVersion(DRAM_MbAddr)}')
-  DramSharedMBbuf = clb.memBlock(DRAM_MbAddr,0x200) # Read/save parameter buffer
-
+  if (DRAM_MbAddr != 0x0):
+    DramSharedMBbuf = clb.memBlock(DRAM_MbAddr,0x200) # Read/save parameter buffer
   Operation = 'Prog'
   Retries = 5
-  Delay = 2
   if(clb.UfsFlag):
     if((CmdSubType == clb.CLI_KNOB_RESTORE_MODIFY) or (CmdSubType == clb.CLI_KNOB_LOAD_DEFAULTS)):
       if (CmdSubType == clb.CLI_KNOB_RESTORE_MODIFY):
@@ -47,10 +46,20 @@ def cliProcessKnobs(xmlfilename, inifilename, CmdSubType, ignoreXmlgeneration=Fa
     log.info('Skipping XML Download, Using the given XML File')
   else:
     if (CmdSubType != clb.CLI_KNOB_LOAD_DEFAULTS):
-      if ( clb.SaveXml(xmlfilename, 1, MbAddr=DRAM_MbAddr) == 1 ):   # Check and Save the GBT XML knobs section.
-        log.error('Aborting due to Error!')
-        clb.CloseInterface()
-        return 1
+      if (DRAM_MbAddr != 0x0):
+        if ( clb.SaveXml(xmlfilename, 1, MbAddr=DRAM_MbAddr) == 1 ):   # Check and Save the GBT XML knobs section.
+          log.error('Aborting due to Error!')
+          clb.CloseInterface()
+          return 1
+  if (DRAM_MbAddr == 0x0):
+    if disable_dram_shared_mailbox:
+      log.error('Dram Shared Mailbox not Valid, cannot proceed without mailbox. Aborting...')
+      clb.CloseInterface()
+      return 1
+    else:
+      log.error('Dram Shared Mailbox not Valid, hence exiting')
+      clb.CloseInterface()
+      return 1
   CLI_ReqBuffAddr      = clb.readclireqbufAddr(DramSharedMBbuf)  # Get CLI Request Buffer Address
   CLI_ResBuffAddr      = clb.readcliresbufAddr(DramSharedMBbuf)  # Get CLI Response Buffer Address
   log.info(f'CLI Request Buffer Addr = 0x{CLI_ReqBuffAddr:X}   CLI Response Buffer Addr = 0x{CLI_ResBuffAddr:X}')
@@ -309,13 +318,13 @@ def CompareFlashRegion(RefBiosFile, NewBiosFile, Region=fwp.ME_Region):
       return 1
 
 
-def savexml(filename=clb.PlatformConfigXml, BiosBin=0, BuildType=0xFF):
+def savexml(filename=clb.PlatformConfigXml, BiosBin=0, BuildType=0xFF, disable_dram_shared_mailbox=False):
   """
   Save entire/complete Target XML to desired file.
 
   In this function we will first check if target XML does exist,
-  if XML exists we will compare XML header and if doesn’t matches we will overwrite current XML.
-  If XML doesn’t exists we will download complete XML in desired file.
+  if XML exists we will compare XML header and if doesn\'t matches we will overwrite current XML.
+  If XML doesn\'t exists we will download complete XML in desired file.
 
   :param filename: absolute path to xml file
   :param BiosBin: (optional) IFWI/BIOS binary to generate xml from
@@ -323,7 +332,7 @@ def savexml(filename=clb.PlatformConfigXml, BiosBin=0, BuildType=0xFF):
   :return:
   """
   if BiosBin == 0:
-    status = clb.SaveXml(filename)
+    status = clb.SaveXml(filename, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
   else:
     status = fwp.GetsetBiosKnobsFromBin(BiosBin, 0, 'genxml', filename, BuildType=BuildType)
   return status
@@ -348,10 +357,11 @@ def CreateTmpIniFile(KnobString):
 
 
 # Program given BIOS knobs for CV.
-def CvProgKnobs(KnobStr=0, BiosBin=0, BinOutSufix=0, UpdateHiiDbDef=False, BiosOut='', BuildType=0xFF):
+
+def CvProgKnobs(KnobStr=0, BiosBin=0, BinOutSufix=0, UpdateHiiDbDef=False, BiosOut='', BuildType=0xFF, disable_dram_shared_mailbox=False):
   IniFile = CreateTmpIniFile(KnobStr)
   if(BiosBin == 0):
-    Status = cliProcessKnobs(clb.PlatformConfigXml, IniFile, clb.CLI_KNOB_APPEND, 0, 1, KnobsVerify=True)
+    Status = cliProcessKnobs(clb.PlatformConfigXml, IniFile, clb.CLI_KNOB_APPEND, 0, 1, KnobsVerify=True, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
   else:
     Status = fwp.GetsetBiosKnobsFromBin(BiosBin, BinOutSufix, 'prog', clb.PlatformConfigXml, IniFile, UpdateHiiDbDef, BiosOut, BuildType=BuildType)
   return Status
@@ -407,8 +417,64 @@ def getKnobsDict(fname):
   return iniDict
 
 # save entire/complete Target XML to desired file.
-def savexmllite(filename=clb.PlatformConfigLiteXml):
-  Status = clb.SaveXmlLite(filename)
+
+def savexmllite(filename=clb.PlatformConfigLiteXml, disable_dram_shared_mailbox=False):
+  Status = clb.SaveXmlLite(filename, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
+  return Status
+
+def ReadKnobsLite(KnobStr=0, disable_dram_shared_mailbox=False):
+  IniFile = CreateTmpIniFile(KnobStr)
+  MyKnobDict = getKnobsDict(IniFile)
+  if(len(MyKnobDict) == 0):
+    log.result('Input knob List is empty, returning!')
+    return 0
+  Status = clb.SaveXmlLite(clb.PlatformConfigLiteXml, Operation='savexml', UserKnobsDict=MyKnobDict, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
+  if (Status == 0):
+    RetDict, PrevDict = prs.xml_to_knob_map(clb.PlatformConfigLiteXml, MyKnobDict)
+    Status = PrintResults(RetDict, Operation='prog')
+  return Status
+
+def ProgKnobsLite(KnobStr=0, disable_dram_shared_mailbox=False):
+  IniFile = CreateTmpIniFile(KnobStr)
+  MyKnobDict = getKnobsDict(IniFile)
+  if(len(MyKnobDict) == 0):
+    log.result('Input knob List is empty, returning!')
+    return 0
+  Status = clb.SaveXmlLite(clb.PlatformConfigLiteXml, Operation='prog', UserKnobsDict=MyKnobDict, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
+  if (Status == 0):
+    RetDict, PrevDict = prs.xml_to_knob_map(clb.PlatformConfigLiteXml, MyKnobDict)
+    Status = PrintResults(RetDict, Operation='prog')
+  return Status
+
+def ResModKnobsLite(KnobStr=0, disable_dram_shared_mailbox=False):
+  Status = clb.SaveXmlLite(clb.PlatformConfigLiteXml, Operation='savexml', disable_dram_shared_mailbox=disable_dram_shared_mailbox)
+  if (Status == 0):
+    IniFile = CreateTmpIniFile(KnobStr)
+    MyKnobDict = getKnobsDict(IniFile)
+    RetDict, PrevDict = prs.xml_to_knob_map(clb.PlatformConfigLiteXml, MyKnobDict, operation='restore')
+    if(len(RetDict) == 0):
+      log.result('Input knob List is empty and other Knobs already thier Defaults, returning!')
+      return 0
+    Status = clb.SaveXmlLite(clb.PlatformConfigLiteXml, Operation='prog', UserKnobsDict=RetDict, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
+    if (Status == 0):
+      ResDict, PrevDict = prs.xml_to_knob_map(clb.PlatformConfigLiteXml, RetDict)
+      Status = PrintResults(ResDict, Operation='prog')
+  return Status
+
+def LoadDefaultsLite(disable_dram_shared_mailbox=False):
+  Status = clb.SaveXmlLite(clb.PlatformConfigLiteXml, Operation='savexml', disable_dram_shared_mailbox=disable_dram_shared_mailbox)
+  if (Status == 0):
+    PreValDict={}
+    RetDict, PrevDict = prs.xml_to_knob_map(clb.PlatformConfigLiteXml, operation='restore')
+    if(len(RetDict) == 0):
+      log.result('Current Knobs already at their Defaults!')
+      return 0
+    Status = clb.SaveXmlLite(clb.PlatformConfigLiteXml, Operation='prog', UserKnobsDict=RetDict, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
+    if (Status == 0):
+      ResDict, tempDict = prs.xml_to_knob_map(clb.PlatformConfigLiteXml, RetDict)
+      for knob in PrevDict:
+        ResDict[knob]['DefVal'] = clb.Str2Int(PrevDict[knob])
+      Status = PrintResults(ResDict, Operation='loaddefaults')
   return Status
 
 def ReadKnobsLite(KnobStr=0):
@@ -467,29 +533,31 @@ def LoadDefaultsLite():
   return Status
 
 # Restore & then modify given BIOS knobs for CV.
-def CvRestoreModifyKnobs(KnobStr=0, BiosBin=0):
+
+def CvRestoreModifyKnobs(KnobStr=0, BiosBin=0, disable_dram_shared_mailbox=False):
   IniFile = CreateTmpIniFile(KnobStr)
   if(BiosBin == 0):
-    Status = cliProcessKnobs(clb.PlatformConfigXml, IniFile, clb.CLI_KNOB_RESTORE_MODIFY, 0, 1, KnobsVerify=True)
+    Status = cliProcessKnobs(clb.PlatformConfigXml, IniFile, clb.CLI_KNOB_RESTORE_MODIFY, 0, 1, KnobsVerify=True, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
   else:
     log.error('Restore modify operation is not supported in Offline mode, please use CvProgKnobs with pristine Bios binary to get the same effect')
     Status = 0
   return Status
 
 # Load Default BIOS knobs for CV.
-def CvLoadDefaults(BiosBin=0):
+
+def CvLoadDefaults(BiosBin=0, disable_dram_shared_mailbox=False):
   if(BiosBin == 0):
-    Status = cliProcessKnobs(clb.PlatformConfigXml, clb.KnobsIniFile, clb.CLI_KNOB_LOAD_DEFAULTS, 0, 1, KnobsVerify=False)
+    Status = cliProcessKnobs(clb.PlatformConfigXml, clb.KnobsIniFile, clb.CLI_KNOB_LOAD_DEFAULTS, 0, 1, KnobsVerify=False, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
   else:
     log.error('Load Defaults operation is not supported in Offline mode, please use pristine Bios binary instead')
     Status = 0
   return Status
 
 # Read BIOS knobs for CV.
-def CvReadKnobs(KnobStr=0, BiosBin=0, BuildType=0xFF):
+def CvReadKnobs(KnobStr=0, BiosBin=0, BuildType=0xFF, disable_dram_shared_mailbox=False):
   IniFile = CreateTmpIniFile(KnobStr)
   if(BiosBin == 0):
-    Status = cliProcessKnobs(clb.PlatformConfigXml, IniFile, clb.CLI_KNOB_READ_ONLY, 0, 1, KnobsVerify=True)
+    Status = cliProcessKnobs(clb.PlatformConfigXml, IniFile, clb.CLI_KNOB_READ_ONLY, 0, 1, KnobsVerify=True, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
   else:
     Status = fwp.GetsetBiosKnobsFromBin(BiosBin, 0, 'readonly', clb.PlatformConfigXml, IniFile, BuildType=BuildType, KnobsVerify=True)
   return Status
@@ -552,8 +620,8 @@ def GenBootOrderDict(PcXml, NewBootOrderStr=''):
     CvProgKnobs('%s' %KnobString)
   return 0
 
-def GetBootOrder():
-  Return=savexml(clb.PlatformConfigXml)
+def GetBootOrder(disable_dram_shared_mailbox=False):
+  Return=savexml(clb.PlatformConfigXml, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
   if (Return==0):
     GenBootOrderDict(clb.PlatformConfigXml)
     log.result('\n\tRequested operations completed successfully.\n')
@@ -562,14 +630,14 @@ def GetBootOrder():
     log.error('\n\tRequested operation is Incomplete\n')
     return 1
 
-def SetBootOrder(NewBootOrderStr=''):
+def SetBootOrder(NewBootOrderStr='', disable_dram_shared_mailbox=False):
   clb.LastErrorSig = 0x0000
   try:
-    Return=savexml(clb.PlatformConfigXml)
+    Return=savexml(clb.PlatformConfigXml, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
     if (Return==0):
       set_operation=GenBootOrderDict(clb.PlatformConfigXml, NewBootOrderStr)
       if (set_operation==0):
-        Return1=savexml(clb.PlatformConfigXml)
+        Return1=savexml(clb.PlatformConfigXml, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
         if (Return1==0):
           GenBootOrderDict(clb.PlatformConfigXml)
           log.result('\tRequested operations completed successfully.\n')

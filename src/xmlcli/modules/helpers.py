@@ -199,7 +199,7 @@ def generate_knobs_delta(ref_xml, new_xml, out_file=r'KnobsDiff.log', compare_ta
   with open(out_file, 'w') as out:
     out.write(file_content)
 
-def compare_bios_knobs(reference_bin_file, new_bin_file, result_log_file=r'KnobsDifference.log', compare_tag='default'):
+def compare_bios_knobs(reference_bin_file, new_bin_file, result_log_file=r'KnobsDifference.log', compare_tag='default', disable_dram_shared_mailbox=False):
   """Take difference of Setup Option between two BIOS/IFWI
 
   :param reference_bin_file: reference bios/ifwi binary
@@ -210,8 +210,8 @@ def compare_bios_knobs(reference_bin_file, new_bin_file, result_log_file=r'Knobs
   """
   reference_xml = clb.KnobsXmlFile.replace('BiosKnobs', 'RefBiosKnobs')
   new_xml = clb.KnobsXmlFile.replace('BiosKnobs', 'MyBiosKnobs')
-  cli.savexml(reference_xml, reference_bin_file)
-  cli.savexml(new_xml, new_bin_file)
+  cli.savexml(reference_xml, reference_bin_file, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
+  cli.savexml(new_xml, new_bin_file, disable_dram_shared_mailbox=disable_dram_shared_mailbox)
   generate_knobs_delta(reference_xml, new_xml, result_log_file, compare_tag)
 
 
